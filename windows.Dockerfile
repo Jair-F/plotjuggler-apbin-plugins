@@ -45,9 +45,9 @@ RUN git clone --recurse-submodules --branch ${PJ_TAG} --depth 1 \
         sed -i -E 's/cmake_minimum_required\(VERSION [0-9.]+/cmake_minimum_required(VERSION 3.10/I' {} +
 
 # Disable plugins that don't cross-compile cleanly for MinGW shared libs:
-#   ParserROS          - Fast-CDR dllimport/dllexport mismatch
+#   ParserROS             - Fast-CDR dllimport/dllexport mismatch
 #   ToolboxFFT/Quaternion - undefined reference to QDomDocument
-#   DataLoadMCAP        - undefined reference to mcap reader symbols
+#   DataLoadMCAP          - undefined reference to mcap reader symbols
 # We don't need any of these for the apbin plugin.
 RUN for plugin in ${BROKEN_PLUGINS}; do \
         sed -i -E "/add_subdirectory\([^)]*${plugin}[^)]*\)/ s/^/#/" PlotJuggler/CMakeLists.txt; \

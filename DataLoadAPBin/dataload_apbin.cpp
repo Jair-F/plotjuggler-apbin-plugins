@@ -23,17 +23,14 @@
 #include <cmath>
 #include <array>
 
-
 // Debugging 
 //#define DEBUG_RUNTIME
 //#define DEBUG_MESSAGES
 //#define DEBUG_MULTIPLIERS
 //#define DEBUG_UNITS
 
-
 // Config
 //#define LABEL_WITH_UNIT
-
 
 bool is_nearly(double val, int val2)
 {
@@ -47,7 +44,6 @@ bool is_nearly(double val, int val2)
     return false;
   }
 }
-
 
 DataLoadAPBIN::DataLoadAPBIN()
 {
@@ -158,7 +154,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
 
     // get message-id from header
     const uint8_t type = buf[total_bytes_used + 2];
-
 
     // -------------------- handle FMT-message -------------------- //
     if (type == LOG_FORMAT_MSG)
@@ -277,7 +272,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
       break;
     }
 
-
     // -------------------- handle FMTU-message -------------------- //
     if ( memcmp(fmt.name, "FMTU", 4) == 0 )
     {
@@ -290,7 +284,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
       has_fmtu[msg_id] = true;
       struct log_Format_Units& fmtu = format_units[msg_id];
       memcpy(&fmtu, &buf[total_bytes_used], sizeof(struct log_Format_Units));
-
 
       // handle instances
       //  - check if units contain "#" (see also: logformat.h)
@@ -326,7 +319,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
       continue;
     }
 
-
     // -------------------- handle MULT-message -------------------- //
     if ( memcmp(fmt.name, "MULT", 4) == 0 )
     {
@@ -354,7 +346,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
       continue;
     }
 
-
     // -------------------- handle UNIT-message -------------------- //
     if ( memcmp(fmt.name, "UNIT", 4) == 0 )
     {
@@ -381,7 +372,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
 
       continue;
     }
-
 
     // -------------------- handle any other message -------------------- //
 
@@ -427,7 +417,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
       other_ms += (other_end - other_start);
     #endif
   }
-
 
   // -------------------- process UNITs -------------------- //
   #ifdef DEBUG_RUNTIME
@@ -475,7 +464,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     process_units_ms += (process_units_end - process_units_start);
   #endif
 
-
   // -------------------- apply multipliers -------------------- //
   #ifdef DEBUG_RUNTIME
     auto apply_mult_start = std::chrono::high_resolution_clock::now();
@@ -486,7 +474,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     apply_mult_ms += (apply_mult_end - apply_mult_start);
   #endif
 
-
   // -------------------- apply timesync -------------------- //
   #ifdef DEBUG_RUNTIME
     auto apply_tsync_start = std::chrono::high_resolution_clock::now();
@@ -496,8 +483,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     auto apply_tsync_end = std::chrono::high_resolution_clock::now();
     apply_tsync_ms += (apply_tsync_end - apply_tsync_start);
   #endif
-
-
 
   #ifdef DEBUG_MESSAGES
   std::printf("\n--------- DEBUG_MESSAGES ---------");
@@ -547,8 +532,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   }
   std::printf("-------------- END --------------\n\n");
   #endif
-
-
 
   // -------------------- publish to plotjuggler -------------------- //
   #ifdef DEBUG_RUNTIME
@@ -659,10 +642,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   return true;
 }
 
-
-
-
-
 void DataLoadAPBIN::handle_message_received(const struct log_Format& fmt, const uint8_t* msg)
 {
   // message id
@@ -695,7 +674,6 @@ void DataLoadAPBIN::handle_message_received(const struct log_Format& fmt, const 
 
   uint32_t msg_offset = LOG_PACKET_HEADER_LEN;  // discard header
 
-  
   /*
     If you need to change this section, please also fix logformat.h (format_types)!
     AP_Logger: Format Types (https://github.com/ArduPilot/ardupilot/tree/master/libraries/AP_Logger#format-types)
@@ -802,8 +780,6 @@ void DataLoadAPBIN::handle_message_received(const struct log_Format& fmt, const 
   }
 }
 
-
-
 DataLoadAPBIN::message_data DataLoadAPBIN::create_message_data(const struct log_Format& fmt)
 {
   QString labelStr(fmt.labels);
@@ -822,8 +798,6 @@ DataLoadAPBIN::message_data DataLoadAPBIN::create_message_data(const struct log_
   }
   return msg_data;
 }
-
-
 
 uint32_t DataLoadAPBIN::get_field_byte_offset(const uint8_t& msg_id, const uint8_t& field_idx)
 {
@@ -863,8 +837,6 @@ uint32_t DataLoadAPBIN::get_field_byte_offset(const uint8_t& msg_id, const uint8
   return total_offset;
 }
 
-
-
 uint32_t DataLoadAPBIN::get_field_byte_offset(const uint8_t& msg_id, const std::string& field_name)
 {
   const std::string& msg_name = msg_id2name[msg_id];
@@ -872,8 +844,6 @@ uint32_t DataLoadAPBIN::get_field_byte_offset(const uint8_t& msg_id, const std::
 
   return get_field_byte_offset(msg_id, field_idx);
 }
-
-
 
 uint8_t DataLoadAPBIN::get_instance(const struct log_Format& fmt, const uint8_t* msg)
 {
@@ -891,8 +861,6 @@ uint8_t DataLoadAPBIN::get_instance(const struct log_Format& fmt, const uint8_t*
 
   return instance;
 }
-
-
 
 std::string DataLoadAPBIN::get_unit(const std::string& msg_name, const std::string& field_name)
 {
@@ -922,8 +890,6 @@ std::string DataLoadAPBIN::get_unit(const std::string& msg_name, const std::stri
 
   return unit_it->second;
 }
-
-
 
 void DataLoadAPBIN::apply_multipliers(void)
 {
@@ -978,7 +944,35 @@ void DataLoadAPBIN::apply_multipliers(void)
   }
 }
 
+// NOTE: is_valid_gps_reference() and gps_to_unix_time() are declared as
+// private static member functions in dataload_apbin.h, since message_data
+// is a private nested type and can't be named by free functions outside
+// the class.
 
+bool DataLoadAPBIN::is_valid_gps_reference(const message_data& sample,
+                                            size_t time_idx, size_t week_idx, size_t ms_idx, size_t nsats_idx,
+                                            double min_nsats)
+{
+  // Returns true if this GPS sample has a usable fix: enough satellites and
+  // non-zero time fields (GPS hasn't acquired a fix yet otherwise).
+  const double nsats   = sample[nsats_idx].second[0];
+  const double time_us = sample[time_idx].second[0];
+  const double gwk     = sample[week_idx].second[0];
+  const double gms     = sample[ms_idx].second[0];
+
+  return nsats > min_nsats && time_us != 0.0 && gwk != 0.0 && gms != 0.0;
+}
+
+double DataLoadAPBIN::gps_to_unix_time(double gps_week, double gps_ms_of_week)
+{
+  // Converts a GPS week/ms-of-week pair into unix time, accounting for the
+  // fixed GPS-to-unix epoch offset and current leap seconds.
+  static constexpr double GPS2UNIX_TIME_OFFSET  = 315964800; // epoch offset between unix and gps time
+  static constexpr double GPS2UNIX_LEAP_SECONDS = -18;       // adjust if number of leap seconds changes
+  static constexpr double SECONDS_PER_WEEK      = 604800;
+
+  return gps_week * SECONDS_PER_WEEK + (gps_ms_of_week * 0.001) + GPS2UNIX_TIME_OFFSET + GPS2UNIX_LEAP_SECONDS;
+}
 
 void DataLoadAPBIN::apply_timesync(void)
 {
@@ -987,62 +981,58 @@ void DataLoadAPBIN::apply_timesync(void)
   //  - ArduPilot log:  local time since power on
   //    -> the logged GNSS time can be used for synchronisation
 
-  // extract GNSS time
+  static constexpr double MIN_VALID_NSATS = 4; // require more than this many satellites for a trustworthy fix
+
   const auto msg_it = messages_map.find("GPS");
-  if ( msg_it == messages_map.end() )
+  if (msg_it == messages_map.end())
   {
     std::printf("Skipping timesync because the logfile does not contain GNSS data\n");
     return;
   }
 
-  // take the first instance as reference
-  // todo: change that?
-  const message_data& gps_msg_data = messages_map["GPS"][0];
+  // Field indexes are shared across all GPS instances/samples.
+  const auto& time_idx  = field_name2idx["GPS"]["TimeUS"];
+  const auto& week_idx  = field_name2idx["GPS"]["GWk"];   // GWk -> GPS week
+  const auto& ms_idx    = field_name2idx["GPS"]["GMS"];   // GMS -> GPS seconds in week (ms)
+  const auto& nsats_idx = field_name2idx["GPS"]["NSats"]; // NSats -> number of satellites used for the fix
 
-  // counter
-  int idx;
-  
-  // get needed field indexes
-  const auto& gps_time_idx = field_name2idx["GPS"]["TimeUS"];
-  const auto& gps_week_idx = field_name2idx["GPS"]["GWk"]; // GWk -> GPS week
-  const auto& gps_ms_idx = field_name2idx["GPS"]["GMS"];   // GMS -> GPS seconds in week (ms)
-
-  // constant time offset variables
-  static constexpr double GPS2UNIX_TIME_OFFSET = 315964800;   // time offset between unix and gps time
-  static constexpr double GPS2UNIX_LEAP_SECONDS = -18;        // additional time offset due to leap seconds (must be adjusted if number of leap seconds changes!)
-  static constexpr double SECONDS_PER_WEEK = 604800;          // number of seconds per week
-
-  const double& gps_week = gps_msg_data[gps_week_idx].second[1];
-  const double gps_week_seconds = gps_msg_data[gps_ms_idx].second[1] * 0.001;
-
-  const double unix_time = gps_week * SECONDS_PER_WEEK + gps_week_seconds + GPS2UNIX_TIME_OFFSET + GPS2UNIX_LEAP_SECONDS;
-
-  const double& log_time = gps_msg_data[gps_time_idx].second[1];
-
-  const double time_offset = unix_time - log_time;
-
-
-  // iterate through messages
-  for (auto& msg_it : messages_map)
+  // Find the first GPS sample with a valid fix to use as the time-sync reference.
+  const message_data* reference = nullptr;
+  for (const auto& instance : msg_it->second)
   {
-    const auto& msg_name = msg_it.first;
+    if (is_valid_gps_reference(instance.second, time_idx, week_idx, ms_idx, nsats_idx, MIN_VALID_NSATS))
+    {
+      reference = &instance.second;
+      break;
+    }
+  }
 
-    auto time_idx_it = field_name2idx[msg_name].find("TimeUS");
+  if (reference == nullptr)
+  {
+    std::printf("Skipping timesync because no GPS sample with a valid fix (NSats > %.0f, non-zero time) was found\n", MIN_VALID_NSATS);
+    return;
+  }
+
+  const double gps_week    = (*reference)[week_idx].second[0];
+  const double gps_week_ms = (*reference)[ms_idx].second[0];
+  const double log_time    = (*reference)[time_idx].second[0];
+  const double time_offset = gps_to_unix_time(gps_week, gps_week_ms) - log_time;
+
+  // Apply the offset to every message type that has a TimeUS field.
+  for (auto& [msg_name, instances_map] : messages_map)
+  {
+    const auto time_idx_it = field_name2idx[msg_name].find("TimeUS");
     if (time_idx_it == field_name2idx[msg_name].end())
     {
       continue;
     }
-    auto& time_idx = time_idx_it->second;
+    const auto& msg_time_idx = time_idx_it->second;
 
-    // iterate through instances
-    auto& instances_map = msg_it.second;
-    for (auto& inst_it : instances_map)
+    for (auto& [instance_id, msg_data] : instances_map)
     {
-      // add time offset
-      message_data& msg_data = inst_it.second;
-
-      std::vector<double>& timestamps = msg_data[time_idx].second;
-      std::transform(timestamps.begin(), timestamps.end(), timestamps.begin(), std::bind(std::plus<double>(), std::placeholders::_1, time_offset));
+      std::vector<double>& timestamps = msg_data[msg_time_idx].second;
+      std::transform(timestamps.begin(), timestamps.end(), timestamps.begin(),
+                      [time_offset](double t) { return t + time_offset; });
     }
   }
 }
