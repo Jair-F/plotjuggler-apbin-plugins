@@ -955,6 +955,12 @@ bool DataLoadAPBIN::is_valid_gps_reference(const message_data& sample,
 {
   // Returns true if this GPS sample has a usable fix: enough satellites and
   // non-zero time fields (GPS hasn't acquired a fix yet otherwise).
+  // IMPORTANT: gwk (GPS week) must also be checked - a sample can have
+  // NSats > 4, non-zero TimeUS, and non-zero GMS, while GWk is still 0
+  // (week number not yet resolved). Without this check, apply_timesync()
+  // anchors the whole log to the GPS epoch (1980-01-06), which is exactly
+  // what produces an impossible multi-decade timestamp spread once that
+  // bogus offset is combined with the real microsecond-scale TimeUS values.
   const double nsats   = sample[nsats_idx].second[0];
   const double time_us = sample[time_idx].second[0];
   const double gwk     = sample[week_idx].second[0];
@@ -977,8 +983,8 @@ double DataLoadAPBIN::gps_to_unix_time(double gps_week, double gps_ms_of_week)
 void DataLoadAPBIN::apply_timesync(void)
 {
   // ArduPilot logs should be comparable with rosbags, therefore the same time basis is needed...
-  //  - rosbag:         unix time
-  //  - ArduPilot log:  local time since power on
+  //  - rosbag:         unix time (seconds, with microsecond fraction)
+  //  - ArduPilot log:  local time since power on, logged in MICROSECONDS (TimeUS)
   //    -> the logged GNSS time can be used for synchronisation
 
   static constexpr double MIN_VALID_NSATS = 4; // require more than this many satellites for a trustworthy fix
@@ -993,7 +999,7 @@ void DataLoadAPBIN::apply_timesync(void)
   // Field indexes are shared across all GPS instances/samples.
   const auto& time_idx  = field_name2idx["GPS"]["TimeUS"];
   const auto& week_idx  = field_name2idx["GPS"]["GWk"];   // GWk -> GPS week
-  const auto& ms_idx    = field_name2idx["GPS"]["GMS"];   // GMS -> GPS seconds in week (ms)
+  const auto& ms_idx    = field_name2idx["GPS"]["GMS"];   // GMS -> GPS milliseconds in week
   const auto& nsats_idx = field_name2idx["GPS"]["NSats"]; // NSats -> number of satellites used for the fix
 
   // Find the first GPS sample with a valid fix to use as the time-sync reference.
@@ -1015,10 +1021,20 @@ void DataLoadAPBIN::apply_timesync(void)
 
   const double gps_week    = (*reference)[week_idx].second[0];
   const double gps_week_ms = (*reference)[ms_idx].second[0];
-  const double log_time    = (*reference)[time_idx].second[0];
-  const double time_offset = gps_to_unix_time(gps_week, gps_week_ms) - log_time;
+  const double log_time_us = (*reference)[time_idx].second[0]; // raw TimeUS, MICROSECONDS
 
-  // Apply the offset to every message type that has a TimeUS field.
+  // gps_to_unix_time() returns SECONDS. Convert to microseconds before
+  // computing the offset, since every TimeUS field is microsecond-scale.
+  const double unix_time_seconds = gps_to_unix_time(gps_week, gps_week_ms);
+  const double unix_time_us      = unix_time_seconds * 1'000'000.0;
+  const double time_offset_us    = unix_time_us - log_time_us;
+
+  #ifdef DEBUG_RUNTIME
+    std::printf("[timesync] gps_week=%.0f gps_week_ms=%.0f log_time_us=%.0f unix_time_us=%.0f offset_us=%.0f\n",
+                gps_week, gps_week_ms, log_time_us, unix_time_us, time_offset_us);
+  #endif
+
+  // Apply the offset (still in microseconds) to every message type that has a TimeUS field.
   for (auto& [msg_name, instances_map] : messages_map)
   {
     const auto time_idx_it = field_name2idx[msg_name].find("TimeUS");
@@ -1032,7 +1048,7 @@ void DataLoadAPBIN::apply_timesync(void)
     {
       std::vector<double>& timestamps = msg_data[msg_time_idx].second;
       std::transform(timestamps.begin(), timestamps.end(), timestamps.begin(),
-                      [time_offset](double t) { return t + time_offset; });
+                      [time_offset_us](double t) { return t + time_offset_us; });
     }
   }
 }
