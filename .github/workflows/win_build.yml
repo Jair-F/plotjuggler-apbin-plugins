@@ -1,6 +1,9 @@
 name: Build PlotJuggler & Plugin
 
-on: [push, pull_request, workflow_dispatch]
+on:
+   push:
+     tags:
+       - '*'
 
 jobs:
   build:
