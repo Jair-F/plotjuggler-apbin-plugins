@@ -1,7 +1,7 @@
 name: Build PlotJuggler & Plugin
 
 on:
-   push:
+  push:
      tags:
        - '*'
 
