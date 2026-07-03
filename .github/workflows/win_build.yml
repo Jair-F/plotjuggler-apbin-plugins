@@ -29,8 +29,10 @@ jobs:
       shell: pwsh
       run: |
         conan profile detect
-        conan config set tools.build:jobs=$([Environment]::ProcessorCount)
-        conan install . -of build --build=missing -pr:b=default -s build_type=Release -s compiler.cppstd=20 -c tools.build:jobs=$([Environment]::ProcessorCount)
+        conan install . -of build --build=missing -pr:b=default `
+          -s build_type=Release -s compiler.cppstd=20 `
+          -c tools.build:jobs=$([Environment]::ProcessorCount) `
+          -c tools.cmake.cmaketoolchain:generator=Ninja
 
     - name: Cache PlotJuggler install
       id: cache-plotjuggler
