@@ -29,15 +29,17 @@ jobs:
       shell: pwsh
       run: |
         conan profile detect
-        conan install . -of build --build=missing -pr:b=default -s build_type=Release
+        conan install . -of build --build=missing -pr:b=default -s build_type=Release -s compiler.cppstd=17
 
     - name: Cache PlotJuggler install
+      id: cache-plotjuggler
       uses: actions/cache@v4
       with:
         path: pj_install/
         key: ${{ runner.os }}-plotjuggler-${{ hashFiles('plotjuggler/**') }}
 
     - name: Clone PlotJuggler
+      if: steps.cache-plotjuggler.outputs.cache-hit != 'true'
       run: git clone --depth 1 --branch 3.9.2 https://github.com/facontidavide/PlotJuggler.git plotjuggler
 
     - name: Build & install PlotJuggler
@@ -48,7 +50,7 @@ jobs:
         cmake --build pj_build --config RelWithDebInfo --target install
 
     - name: Build your plugin
-      run: |        
+      run: |
         Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
         mkdir build
         cd build
