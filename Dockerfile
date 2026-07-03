@@ -21,7 +21,7 @@ RUN git clone --depth 1 --branch ${PJ_TAG} https://github.com/facontidavide/Plot
 # Build PlotJuggler. This will take a long time.
 WORKDIR /plotjuggler_ws
 RUN cmake -S src/PlotJuggler -B build/PlotJuggler -DCMAKE_INSTALL_PREFIX=install \
-    && cmake --build build/PlotJuggler --config RelWithDebInfo --target install
+    && cmake --build build/PlotJuggler --config RelWithDebInfo --target install -j"$(nproc)"
 
 ###############################################################################
 # Compile the plugin
