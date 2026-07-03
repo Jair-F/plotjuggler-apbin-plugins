@@ -29,7 +29,7 @@ jobs:
       shell: pwsh
       run: |
         conan profile detect
-        conan install . -of build --build=missing -pr:b=default -s build_type=Release -s compiler.cppstd=17
+        conan install . -of build --build=missing -pr:b=default -s build_type=Release -s compiler.cppstd=20
 
     - name: Cache PlotJuggler install
       id: cache-plotjuggler
@@ -57,7 +57,6 @@ jobs:
         cmake .. -Dplotjuggler_DIR="${{ github.workspace }}\pj_install\lib\cmake\plotjuggler" -DADD_UNITS=OFF
         cmake --build . --config Release
         cmake --install . --prefix "${{ github.workspace }}\plugin_install"
-
 
     - name: Upload plugin artifact
       uses: actions/upload-artifact@v4
