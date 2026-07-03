@@ -34,11 +34,7 @@ This requires that you have Docker installed in your system.
 
 3. Build the plugin for linux with
     ```bash
-    docker build -o type=local,dest=artifacts .
-    ```
-    for windows:
-    ```bash
-    docker buildx build -f windows.Dockerfile --build-arg ADD_UNITS=ON -o type=local,dest=artifacts --progress=plain .
+    docker build -o type=local,dest=artifacts --build-arg ADD_UNITS=ON .
     ```
     This command will clone and build PlotJuggler anew, which takes a lot of time.
 

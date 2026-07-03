@@ -2,8 +2,6 @@ name: Build PlotJuggler & Plugin
 
 on:
   push:
-    branches:
-      - '**'
     tags:
        - '*'
 
