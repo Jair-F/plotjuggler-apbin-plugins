@@ -32,7 +32,7 @@ This requires that you have Docker installed in your system.
     mkdir artifacts
     ```
 
-3. Build the plugin for linux with
+3. Build the plugin with
     ```bash
     docker build -o type=local,dest=artifacts --build-arg ADD_UNITS=ON .
     ```
