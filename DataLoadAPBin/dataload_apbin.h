@@ -108,9 +108,5 @@ private:
   // apply time synchronization to the messages_map
   void apply_timesync(void);
 
-  static bool is_valid_gps_reference(const message_data& sample,
-                                      size_t time_idx, size_t week_idx, size_t ms_idx, size_t nsats_idx,
-                                      double min_nsats);
-
   static double gps_to_unix_time(double gps_week, double gps_ms_of_week);
 };

@@ -944,39 +944,20 @@ void DataLoadAPBIN::apply_multipliers(void)
   }
 }
 
-// NOTE: is_valid_gps_reference() and gps_to_unix_time() are declared as
-// private static member functions in dataload_apbin.h, since message_data
-// is a private nested type and can't be named by free functions outside
-// the class.
-
-bool DataLoadAPBIN::is_valid_gps_reference(const message_data& sample,
-                                            size_t time_idx, size_t week_idx, size_t ms_idx, size_t nsats_idx,
-                                            double min_nsats)
-{
-  // Returns true if this GPS sample has a usable fix: enough satellites and
-  // non-zero time fields (GPS hasn't acquired a fix yet otherwise).
-  // IMPORTANT: gwk (GPS week) must also be checked - a sample can have
-  // NSats > 4, non-zero TimeUS, and non-zero GMS, while GWk is still 0
-  // (week number not yet resolved). Without this check, apply_timesync()
-  // anchors the whole log to the GPS epoch (1980-01-06), which is exactly
-  // what produces an impossible multi-decade timestamp spread once that
-  // bogus offset is combined with the real microsecond-scale TimeUS values.
-  const double nsats   = sample[nsats_idx].second[0];
-  const double time_us = sample[time_idx].second[0];
-  const double gwk     = sample[week_idx].second[0];
-  const double gms     = sample[ms_idx].second[0];
-
-  return nsats > min_nsats && time_us != 0.0 && gwk != 0.0 && gms != 0.0;
-}
 
 double DataLoadAPBIN::gps_to_unix_time(double gps_week, double gps_ms_of_week)
 {
-  double gps_week_seconds = gps_ms_of_week * 0.001;
-  static constexpr double GPS2UNIX_TIME_OFFSET = 315964800.0;   // Unix epoch vs GPS epoch
-  static constexpr double GPS2UNIX_LEAP_SECONDS = -18.0;        // Current leap seconds
-  static constexpr double SECONDS_PER_WEEK = 604800.0;          // 60 * 60 * 24 * 7
+    static constexpr double SECONDS_PER_WEEK       = 60 * 60 * 24 * 7;   // 60 * 60 * 24 * 7
+    static constexpr double MS_PER_SECOND          = 1000.0;
+    static constexpr double GPS2UNIX_TIME_OFFSET   = 315964800.0; // Unix epoch vs GPS epoch
+    static constexpr double GPS2UNIX_LEAP_SECONDS  = -18.0;       // Current leap seconds
 
-  return (gps_week * SECONDS_PER_WEEK) + gps_week_seconds + GPS2UNIX_TIME_OFFSET + GPS2UNIX_LEAP_SECONDS;
+    const double gps_week_seconds = gps_ms_of_week / MS_PER_SECOND;
+
+    return (gps_week * SECONDS_PER_WEEK)
+         + gps_week_seconds
+         + GPS2UNIX_TIME_OFFSET
+         + GPS2UNIX_LEAP_SECONDS;
 }
 
 void DataLoadAPBIN::apply_timesync(void)
@@ -993,11 +974,42 @@ void DataLoadAPBIN::apply_timesync(void)
   // Target the first available GPS instance (typically Instance 0)
   const auto& first_gps_instance = msg_it->second.begin()->second;
 
-  // Field indexes
-  const auto& time_idx  = field_name2idx["GPS"]["TimeUS"];
-  const auto& week_idx  = field_name2idx["GPS"]["GWk"];   
-  const auto& ms_idx    = field_name2idx["GPS"]["GMS"];   
-  const auto& nsats_idx = field_name2idx["GPS"]["NSats"]; 
+  // Safely look up the GPS field-name -> index map first
+  const auto gps_fields_it = field_name2idx.find("GPS");
+  if (gps_fields_it == field_name2idx.end())
+  {
+    std::printf("Skipping timesync because the logfile has no field definitions for 'GPS'\n");
+    return;
+  }
+  const auto& gps_fields = gps_fields_it->second;
+
+  // Safely resolve each required field index, bailing out with a clear
+  // error if any label is missing instead of silently defaulting to 0
+  // (which is what operator[] on a std::map would otherwise do).
+  auto require_field = [&](const std::string& label, uint8_t& out_idx) -> bool
+  {
+    const auto it = gps_fields.find(label);
+    if (it == gps_fields.end())
+    {
+      std::printf("Skipping timesync because GPS message has no '%s' field!\n", label.c_str());
+      return false;
+    }
+    out_idx = it->second;
+    return true;
+  };
+
+  uint8_t time_idx{ 0 };
+  uint8_t week_idx{ 0 };
+  uint8_t ms_idx{ 0 };
+  uint8_t nsats_idx{ 0 };
+
+  if (!require_field("TimeUS", time_idx)  ||
+      !require_field("GWk",    week_idx)  ||
+      !require_field("GMS",    ms_idx)    ||
+      !require_field("NSats",  nsats_idx))
+  {
+    return;
+  }
 
   // Extract the actual vectors of logged data points
   const auto& time_vec  = first_gps_instance.at(time_idx).second;
@@ -1005,20 +1017,31 @@ void DataLoadAPBIN::apply_timesync(void)
   const auto& ms_vec    = first_gps_instance.at(ms_idx).second;
   const auto& nsats_vec = first_gps_instance.at(nsats_idx).second;
 
+  // DEBUG: confirm units of time_vec before trusting any conversion assumption.
+  // If these print as small fractional numbers (e.g. 45.231), TimeUS is already
+  // in seconds after apply_multipliers() ran. If they print as huge raw integers
+  // (e.g. 45231000), TimeUS is still in microseconds at this point.
+  if (!time_vec.empty())
+  {
+    std::printf("DEBUG: raw time_vec.front()=%.6f time_vec.back()=%.6f\n",
+                time_vec.front(), time_vec.back());
+  }
+
   size_t valid_sample_idx = 0;
   bool found_valid_fix = false;
 
   // Loop THROUGH THE TIMELINE of logged GPS samples
   for (size_t i = 0; i < time_vec.size(); ++i)
   {
-    // Ensure vectors have the elements and check conditions for a healthy lock
-    if (i < nsats_vec.size() && nsats_vec[i] > MIN_VALID_NSATS &&
-        i < week_vec.size()  && week_vec[i] > 0 &&
-        i < ms_vec.size()    && ms_vec[i] > 0)
+    if (i < nsats_vec.size() && i < week_vec.size() && i < ms_vec.size() &&
+        nsats_vec[i] >= MIN_VALID_NSATS &&   // relaxed to >=
+        time_vec[i]  != 0.0 &&               // added missing check
+        week_vec[i]  > 0.0 &&
+        ms_vec[i]    > 0.0)
     {
       valid_sample_idx = i;
       found_valid_fix = true;
-      break; // Found our sync point, stop searching!
+      break;
     }
   }
 
@@ -1031,19 +1054,34 @@ void DataLoadAPBIN::apply_timesync(void)
   // Extract values at the valid chronological index found
   const double gps_week    = week_vec[valid_sample_idx];
   const double gps_week_ms = ms_vec[valid_sample_idx];
-  const double log_time_sec = time_vec[valid_sample_idx] * 0.000001; // Convert reference TimeUS to seconds
+
+  // TimeUS is already in SECONDS by this point, because apply_multipliers()
+  // runs before apply_timesync() and rescales TimeUS using its FMTU multiplier
+  // (commonly 0.000001, converting raw microseconds to seconds). Dividing by
+  // 1e6 again here was the bug that collapsed the whole log into a
+  // sub-one-second time range.
+  const double log_time_sec = time_vec[valid_sample_idx];
 
   // Get Unix time directly in SECONDS (e.g., 1750692063.6)
   const double unix_time_sec = gps_to_unix_time(gps_week, gps_week_ms);
-  
+
   // Calculate offset purely in SECONDS
   const double time_offset_sec = unix_time_sec - log_time_sec;
 
-  // Apply the offset and convert all microsecond vectors into seconds for PlotJuggler
+  std::printf("DEBUG: idx=%zu gps_week=%.3f gps_week_ms=%.3f log_time_sec=%.6f unix_time_sec=%.3f offset=%.3f\n",
+              valid_sample_idx, gps_week, gps_week_ms, log_time_sec, unix_time_sec, time_offset_sec);
+
+  // Apply the offset to every message's TimeUS vector (already in seconds)
   for (auto& [msg_name, instances_map] : messages_map)
   {
-    const auto time_idx_it = field_name2idx[msg_name].find("TimeUS");
-    if (time_idx_it == field_name2idx[msg_name].end())
+    const auto msg_fields_it = field_name2idx.find(msg_name);
+    if (msg_fields_it == field_name2idx.end())
+    {
+      continue;
+    }
+
+    const auto time_idx_it = msg_fields_it->second.find("TimeUS");
+    if (time_idx_it == msg_fields_it->second.end())
     {
       continue;
     }
@@ -1052,10 +1090,10 @@ void DataLoadAPBIN::apply_timesync(void)
     for (auto& [instance_id, msg_data] : instances_map)
     {
       std::vector<double>& timestamps = msg_data[msg_time_idx].second;
-      
-      // Convert raw t (microseconds) to seconds first, then apply the Unix seconds offset
+
+      // No conversion needed here anymore — just shift by the computed offset
       std::transform(timestamps.begin(), timestamps.end(), timestamps.begin(),
-                      [time_offset_sec](double t) { return (t * 0.000001) + time_offset_sec; });
+                      [time_offset_sec](double t) { return t + time_offset_sec; });
     }
   }
 }
