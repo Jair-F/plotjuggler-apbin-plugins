@@ -82,12 +82,14 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     return false;
   }
 
-  const QByteArray file_array = file.readAll();
-  const int32_t file_size = file_array.size();
-
-  const uint8_t* buf = reinterpret_cast<const uint8_t*>(file_array.data());
-  const uint32_t len = file_array.size();
-  uint32_t total_bytes_used = 0;
+  const qint64 file_size = file.size();
+  const uint8_t* buf = reinterpret_cast<const uint8_t*>(file.map(0, file_size));
+  if (!buf)
+  {
+    return false;
+  }
+  const uint64_t len = static_cast<uint64_t>(file_size);
+  uint64_t total_bytes_used = 0;
 
   // Progress box for large file
   QProgressDialog progress_dialog;
@@ -101,9 +103,9 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   int progress{ 0 };
   int progress_update{ 0 };
 
-  uint32_t bytes_skipped{ 0 };
-  uint32_t msgs_skipped{ 0 };
-  uint32_t msgs_read{ 0 };
+  uint64_t bytes_skipped{ 0 };
+  uint64_t msgs_skipped{ 0 };
+  uint64_t msgs_read{ 0 };
 
   QElapsedTimer timer;
   timer.start();
@@ -163,7 +165,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
       #endif
 
       // check if we don't reach the end
-      if ((uint32_t)(len - total_bytes_used) < sizeof(struct log_Format))
+      if ((len - total_bytes_used) < sizeof(struct log_Format))
       {
         bytes_skipped += len - total_bytes_used;
         break;
@@ -635,9 +637,9 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
 
   qDebug() << "The loading operation took" << timer.elapsed() << "milliseconds";
 
-  std::printf("\n  Read messages:\t%d", msgs_read);
-  std::printf("\n  Skipped messages:\t%d", msgs_skipped);
-  std::printf("\n  Skipped bytes:\t%d from %d bytes\n\n", bytes_skipped, len);
+  std::printf("\n  Read messages:\t%lu", static_cast<unsigned long long>(msgs_read));
+  std::printf("\n  Skipped messages:\t%lu", static_cast<unsigned long long>(msgs_skipped));
+  std::printf("\n  Skipped bytes:\t%lu from %lu bytes\n\n", static_cast<unsigned long long>(bytes_skipped, len));
 
   return true;
 }
