@@ -637,9 +637,11 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
 
   qDebug() << "The loading operation took" << timer.elapsed() << "milliseconds";
 
-  std::printf("\n  Read messages:\t%lu", static_cast<unsigned long long>(msgs_read));
-  std::printf("\n  Skipped messages:\t%lu", static_cast<unsigned long long>(msgs_skipped));
-  std::printf("\n  Skipped bytes:\t%lu from %lu bytes\n\n", static_cast<unsigned long long>(bytes_skipped, len));
+  std::printf("\n  Read messages:\t%llu", static_cast<unsigned long long>(msgs_read));
+  std::printf("\n  Skipped messages:\t%llu", static_cast<unsigned long long>(msgs_skipped));
+  std::printf("\n  Skipped bytes:\t%llu from %llu bytes\n\n",
+              static_cast<unsigned long long>(bytes_skipped),
+              static_cast<unsigned long long>(len));
 
   return true;
 }
@@ -946,18 +948,20 @@ void DataLoadAPBIN::apply_multipliers(void)
   }
 }
 
-
-double DataLoadAPBIN::gps_to_unix_time(double gps_week, double gps_ms_of_week)
+double DataLoadAPBIN::gps_to_unix_time(double gps_week, double gps_week_of_seconds)
 {
-    static constexpr double SECONDS_PER_WEEK      = 60 * 60 * 24 * 7;   // 60 * 60 * 24 * 7
-    static constexpr double MS_PER_SECOND         = 1000.0;
-    static constexpr double GPS2UNIX_TIME_OFFSET  = 315964800.0; // Unix epoch vs GPS epoch
-    static constexpr double GPS2UNIX_LEAP_SECONDS = -18.0;       // Current leap seconds
+    static constexpr double SECONDS_PER_WEEK      = 60 * 60 * 24 * 7;
+    static constexpr double GPS2UNIX_TIME_OFFSET   = 315964800.0;
+    static constexpr double GPS2UNIX_LEAP_SECONDS  = -18.0;
 
-    const double gps_week_seconds = gps_ms_of_week / MS_PER_SECOND;
-
+    // NOTE: gps_week_of_seconds is expected to already be in SECONDS.
+    // apply_multipliers() converts the raw GMS field from milliseconds to
+    // seconds (per the FMTU multiplier, e.g. 0.001), before apply_timesync()
+    // ever reads it. Dividing it by 1000 again here would silently shrink
+    // an already-correct ~567443.7 second value down to ~567.4 seconds,
+    // producing a multi-day offset error in the final Unix timestamp.
     return (gps_week * SECONDS_PER_WEEK)
-         + gps_week_seconds
+         + gps_week_of_seconds
          + GPS2UNIX_TIME_OFFSET
          + GPS2UNIX_LEAP_SECONDS;
 }
@@ -973,12 +977,9 @@ namespace
     uint8_t week_idx;
     uint8_t ms_idx;
     uint8_t nsats_idx;
+    std::optional<uint8_t> status_idx;  // optional: not all logs have Status
   };
 
-  // Resolves the index of each required GPS field by name.
-  // Returns std::nullopt (and prints a clear message) if any field is
-  // missing, instead of silently defaulting to index 0 via
-  // std::map::operator[].
   std::optional<GpsFieldIndices> resolve_gps_field_indices(
       const std::map<std::string, std::map<std::string, uint8_t>>& field_name2idx)
   {
@@ -1011,32 +1012,75 @@ namespace
       return std::nullopt;
     }
 
-    return GpsFieldIndices{ *time_idx, *week_idx, *ms_idx, *nsats_idx };
+    // Status is optional - used as an extra sanity check if present, but
+    // we don't hard-fail the whole timesync if it's missing from this log.
+    auto status_it = gps_fields.find("Status");
+    std::optional<uint8_t> status_idx = std::nullopt;
+    if (status_it != gps_fields.end())
+    {
+      status_idx = status_it->second;
+    }
+
+    return GpsFieldIndices{ *time_idx, *week_idx, *ms_idx, *nsats_idx, status_idx };
   }
 
-  // Scans the logged GPS timeline for the first sample with a usable fix:
-  // enough satellites, and non-zero TimeUS/GWk/GMS. GWk in particular must be
-  // checked, since a sample can report NSats > 4 and non-zero TimeUS/GMS
-  // while GWk is still 0 (week number not yet resolved) - accepting that
-  // sample would anchor the whole log to the GPS epoch (1980-01-06).
   std::optional<size_t> find_first_valid_gps_sample(
       const std::vector<double>& time_vec,
       const std::vector<double>& week_vec,
       const std::vector<double>& ms_vec,
       const std::vector<double>& nsats_vec,
-      double min_nsats)
+      const std::vector<double>* status_vec,
+      double min_nsats,
+      double min_status,
+      size_t required_consecutive = 5)
   {
+    auto gps_time_sec = [&](size_t i) {
+      return week_vec[i] * 604800.0 + ms_vec[i] / 1000.0;
+    };
+
+    size_t consecutive_ok = 0;
+    size_t candidate_start = 0;
+
     for (size_t i = 0; i < time_vec.size(); ++i)
     {
-      if (i < nsats_vec.size() && i < week_vec.size() && i < ms_vec.size() &&
-          nsats_vec[i] >= min_nsats &&
-          time_vec[i]  != 0.0 &&
-          week_vec[i]  > 0.0  &&
-          ms_vec[i]    > 0.0)
+      const bool bounds_ok = i < nsats_vec.size() && i < week_vec.size() && i < ms_vec.size();
+      const bool nsats_ok  = bounds_ok && nsats_vec[i] >= min_nsats;
+      const bool status_ok = !status_vec || i >= status_vec->size() || (*status_vec)[i] >= min_status;
+      const bool basic_ok  = bounds_ok && nsats_ok && status_ok &&
+                              time_vec[i] != 0.0 && week_vec[i] > 0.0 && ms_vec[i] > 0.0;
+
+      if (!basic_ok)
       {
-        return i;
+        consecutive_ok = 0;
+        continue;
+      }
+
+      if (consecutive_ok == 0)
+      {
+        candidate_start = i;
+      }
+      else
+      {
+        // Check that GPS time is actually advancing in step with onboard TimeUS,
+        // not stuck on a stale cached value. Allow generous tolerance (2s) for
+        // receiver jitter, but a real advancing clock should track closely.
+        const double gps_dt  = gps_time_sec(i) - gps_time_sec(i - 1);
+        const double time_dt = (time_vec[i] - time_vec[i - 1]) / 1e6;  // TimeUS -> sec
+        if (std::abs(gps_dt - time_dt) > 2.0)
+        {
+          consecutive_ok = 0;
+          candidate_start = i;
+          continue;
+        }
+      }
+
+      consecutive_ok++;
+      if (consecutive_ok >= required_consecutive)
+      {
+        return candidate_start;
       }
     }
+
     return std::nullopt;
   }
 
@@ -1074,7 +1118,8 @@ namespace
 
 void DataLoadAPBIN::apply_timesync(void)
 {
-  static constexpr double MIN_VALID_NSATS = 4;
+  static constexpr double MIN_VALID_NSATS  = 4;
+  static constexpr double MIN_VALID_STATUS = 3;  // GPS_OK_FIX_3D or better
 
   const auto msg_it = messages_map.find("GPS");
   if (msg_it == messages_map.end() || msg_it->second.empty())
@@ -1083,7 +1128,6 @@ void DataLoadAPBIN::apply_timesync(void)
     return;
   }
 
-  // Target the first available GPS instance (typically Instance 0)
   const auto& first_gps_instance = msg_it->second.begin()->second;
 
   const auto field_indices = resolve_gps_field_indices(field_name2idx);
@@ -1097,22 +1141,31 @@ void DataLoadAPBIN::apply_timesync(void)
   const auto& ms_vec    = first_gps_instance.at(field_indices->ms_idx).second;
   const auto& nsats_vec = first_gps_instance.at(field_indices->nsats_idx).second;
 
+  const std::vector<double>* status_vec = nullptr;
+  if (field_indices->status_idx)
+  {
+    status_vec = &first_gps_instance.at(*field_indices->status_idx).second;
+  }
+
   const auto valid_sample_idx =
-      find_first_valid_gps_sample(time_vec, week_vec, ms_vec, nsats_vec, MIN_VALID_NSATS);
+      find_first_valid_gps_sample(time_vec, week_vec, ms_vec, nsats_vec,
+                                   status_vec, MIN_VALID_NSATS, MIN_VALID_STATUS);
 
   if (!valid_sample_idx)
   {
-    std::printf("Skipping timesync because no sequential GPS sample with a valid fix was found\n");
+    std::printf("Skipping timesync because no stable GPS fix was found\n");
     return;
   }
 
-  const double gps_week    = week_vec[*valid_sample_idx];
-  const double gps_week_ms = ms_vec[*valid_sample_idx];
+  const double gps_week      = week_vec[*valid_sample_idx];
+  const double gps_week_secs = ms_vec[*valid_sample_idx];  // already in seconds, despite the vector's old name
+  const double log_time_sec  = time_vec[*valid_sample_idx];
 
-  const double log_time_sec = time_vec[*valid_sample_idx];
-
-  const double unix_time_sec   = gps_to_unix_time(gps_week, gps_week_ms);
+  const double unix_time_sec   = gps_to_unix_time(gps_week, gps_week_secs);
   const double time_offset_sec = unix_time_sec - log_time_sec;
+
+  std::printf("Timesync anchor: GWk=%.0f GMS=%.0f TimeUS(sec)=%.3f -> offset=%.3f sec\n",
+              gps_week, gps_week_secs, log_time_sec, time_offset_sec);
 
   shift_all_timestamps(messages_map, field_name2idx, time_offset_sec);
 }
